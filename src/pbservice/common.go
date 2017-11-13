@@ -13,7 +13,8 @@ type PutAppendArgs struct {
 	Key   string
 	Value string
 	// You'll have to add definitions here.
-
+	Op    string
+    Seq   int64
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
 }
@@ -34,3 +35,26 @@ type GetReply struct {
 
 
 // Your RPC definitions here.
+type TransferArgs struct {
+    Database map[string]string
+    HandleHistory map[int64]bool
+}
+
+type TransferReply struct {
+    Err Err
+}
+
+type ForwardArgs struct {
+	Key   string
+	Value string
+	// You'll have to add definitions here.
+	Op    string
+    Seq   int64
+    Me    string
+	// Field names must start with capital letters,
+	// otherwise RPC will break.
+}
+
+type ForwardReply struct {
+	Err Err
+}

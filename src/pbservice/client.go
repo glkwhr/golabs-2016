@@ -6,11 +6,13 @@ import "fmt"
 
 import "crypto/rand"
 import "math/big"
-
+import "time"
+//import "log"
 
 type Clerk struct {
 	vs *viewservice.Clerk
 	// Your declarations here
+	currentPrimary string
 }
 
 // this may come in handy.
@@ -25,6 +27,7 @@ func MakeClerk(vshost string, me string) *Clerk {
 	ck := new(Clerk)
 	ck.vs = viewservice.MakeClerk(me, vshost)
 	// Your ck.* initializations here
+	ck.currentPrimary = ""
 
 	return ck
 }
@@ -64,6 +67,17 @@ func call(srv string, rpcname string,
 	return false
 }
 
+func (ck *Clerk) updatePrimary() {
+    for {
+        currentPrimary := ck.vs.Primary()
+        if currentPrimary != "" {
+            ck.currentPrimary = currentPrimary
+            break
+        }
+        time.Sleep(viewservice.PingInterval)
+    }
+}
+
 //
 // fetch a key's value from the current primary;
 // if they key has never been set, return "".
@@ -74,8 +88,21 @@ func call(srv string, rpcname string,
 func (ck *Clerk) Get(key string) string {
 
 	// Your code here.
+	args := new(GetArgs)
+	args.Key = key
+	reply := new(GetReply)
+	for ok := call(ck.currentPrimary, "PBServer.Get", args, reply);; {
+	    //log.Printf("Gets (%v)\n", key)
+	    if ok == false || ck.currentPrimary == "" || reply.Err == ErrWrongServer {
+	        ck.updatePrimary()
+	        ok = call(ck.currentPrimary, "PBServer.Get", args, reply)
+	    } else {
+            // got a response (OK or ErrNoKey)
+            break
+	    }
+	}
 
-	return "???"
+	return reply.Value
 }
 
 //
@@ -84,6 +111,24 @@ func (ck *Clerk) Get(key string) string {
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 	// Your code here.
+	args := new(PutAppendArgs)
+	args.Key = key
+	args.Value = value
+	args.Op = op
+	args.Seq = nrand()
+	reply := new(PutAppendReply)
+	//log.Printf("%vs (%v,%v) to %v Seq:%v\n", op, key, value, ck.currentPrimary, args.Seq)	
+	for ok := call(ck.currentPrimary, "PBServer.PutAppend", args, reply);; {
+	    //log.Printf("in loop")	    
+	    //log.Printf("called PutAppend %v", ck.currentPrimary)
+	    if ok == false || ck.currentPrimary == "" || reply.Err != OK {
+	        ck.updatePrimary()
+	        ok = call(ck.currentPrimary, "PBServer.PutAppend", args, reply)
+	    } else {
+	        break
+	    }
+	    time.Sleep(viewservice.PingInterval)
+	}
 }
 
 //
