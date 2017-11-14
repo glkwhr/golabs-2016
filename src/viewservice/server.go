@@ -149,51 +149,49 @@ func (vs *ViewServer) tick() {
 
 	// Your code here.
 	deadInterval := PingInterval * DeadPings
-	if vs.isdead() != true {
-	    vs.mu.Lock()
-	    now := time.Now()
-	    if vs.currentView.Viewnum > 0 && vs.primaryResponse == true {
-	        //log.Printf("checking next view...\n")
-	        nextView := View{}
-	        nextView.Viewnum = vs.currentView.Viewnum + 1
-	        nextView.Primary = vs.currentView.Primary
-	        nextView.Backup = vs.currentView.Backup
-	        promoted := false
-	        changed := false
-	        if (vs.currentView.Primary == "") || (now.Sub(vs.pingHistory[vs.currentView.Primary]) > deadInterval) {
-	            // needs a new primary server
-	            //log.Printf("needs a new primary server\n")
-	            nextView.Primary = ""
-	            changed = vs.currentView.Primary == ""
-	            if vs.currentView.Backup != "" && vs.backupResponse {
-	                // promote current backup server
-	                //log.Printf("promotes current backup server: %v\n", vs.currentView.Backup)
-	                nextView.Primary = vs.currentView.Backup
-	                nextView.Backup = ""
-	                promoted = true
-	            }
-	        }
-	        if promoted == true || vs.currentView.Backup == "" || (now.Sub(vs.pingHistory[vs.currentView.Backup]) > deadInterval) {
-	            // needs a new backup server
-	            //log.Printf("needs a new backup server\n")
-	            nextView.Backup = vs.getNewBackup()
-	            changed = nextView.Backup != vs.currentView.Backup
-	        }
-	        
-	        if changed == true {
-	            //log.Printf("changes view to %v\n", nextView.Viewnum)
-	            vs.currentView = nextView
-	            vs.primaryResponse = vs.currentView.Primary == ""
-	            vs.backupResponse = false
-	        }	        
-	    }
-	    //log.Printf("%v view %v:\n", vs.me, vs.currentView.Viewnum)
-        //log.Printf("primary %v %v %v\n", vs.currentView.Primary, vs.primaryResponse, now.Sub(vs.pingHistory[vs.currentView.Primary]))
-        //log.Printf("backup %v %v %v\n", vs.currentView.Backup, vs.backupResponse, now.Sub(vs.pingHistory[vs.currentView.Backup]))
-        //log.Printf("dead interval %v\n", deadInterval)
-        //log.Printf("idle servers: %v\n", len(vs.idleServers))
-	    vs.mu.Unlock()
-	}
+    vs.mu.Lock()
+    now := time.Now()
+    if vs.currentView.Viewnum > 0 && vs.primaryResponse == true {
+        //log.Printf("checking next view...\n")
+        nextView := View{}
+        nextView.Viewnum = vs.currentView.Viewnum + 1
+        nextView.Primary = vs.currentView.Primary
+        nextView.Backup = vs.currentView.Backup
+        promoted := false
+        changed := false
+        if (vs.currentView.Primary == "") || (now.Sub(vs.pingHistory[vs.currentView.Primary]) > deadInterval) {
+            // needs a new primary server
+            //log.Printf("needs a new primary server\n")
+            nextView.Primary = ""
+            changed = vs.currentView.Primary == ""
+            if vs.currentView.Backup != "" && vs.backupResponse {
+                // promote current backup server
+                //log.Printf("promotes current backup server: %v\n", vs.currentView.Backup)
+                nextView.Primary = vs.currentView.Backup
+                nextView.Backup = ""
+                promoted = true
+            }
+        }
+        if promoted == true || vs.currentView.Backup == "" || (now.Sub(vs.pingHistory[vs.currentView.Backup]) > deadInterval) {
+            // needs a new backup server
+            //log.Printf("needs a new backup server\n")
+            nextView.Backup = vs.getNewBackup()
+            changed = nextView.Backup != vs.currentView.Backup
+        }
+        
+        if changed == true {
+            //log.Printf("changes view to %v\n", nextView.Viewnum)
+            vs.currentView = nextView
+            vs.primaryResponse = vs.currentView.Primary == ""
+            vs.backupResponse = false
+        }	        
+    }
+    //log.Printf("%v view %v:\n", vs.me, vs.currentView.Viewnum)
+    //log.Printf("primary %v %v %v\n", vs.currentView.Primary, vs.primaryResponse, now.Sub(vs.pingHistory[vs.currentView.Primary]))
+    //log.Printf("backup %v %v %v\n", vs.currentView.Backup, vs.backupResponse, now.Sub(vs.pingHistory[vs.currentView.Backup]))
+    //log.Printf("dead interval %v\n", deadInterval)
+    //log.Printf("idle servers: %v\n", len(vs.idleServers))
+    vs.mu.Unlock()
 }
 
 //

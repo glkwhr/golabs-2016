@@ -23,7 +23,6 @@ type PBServer struct {
 	vs         *viewservice.Clerk
 	// Your declarations here.
 	database   map[string]string
-	dataLock   sync.Mutex
 	handleHistory map[int64]bool
 	view       viewservice.View
 	isPrimary  bool
@@ -114,7 +113,6 @@ func (pb *PBServer) forwardBackup(args *PutAppendArgs) bool {
 }
 
 func (pb *PBServer) handlePutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-    reply.Err = OK
     //log.Printf("Enter %v handlePutAppend()\n", pb.me)
     //pb.dataLock.Lock()
     //log.Printf("%v gained dataLock(handlePutAppend)\n", pb.me)
@@ -130,10 +128,14 @@ func (pb *PBServer) handlePutAppend(args *PutAppendArgs, reply *PutAppendReply) 
                 //log.Printf("Put %v database\n", pb.me)
                 pb.database[args.Key] = args.Value
             }
+            //log.Printf("%vs (%v,%v) to %v Seq:%v\n", args.Op, args.Key, args.Value, pb.me, args.Seq)
             pb.handleHistory[args.Seq] = true
+            reply.Err = OK
         } else {
             reply.Err = ErrWrongServer
         }
+    } else {
+        reply.Err = OK
     }
     
     //pb.dataLock.Unlock()
@@ -147,6 +149,7 @@ func (pb *PBServer) transferBackup() error {
     args := new(TransferArgs)
     args.Database = pb.database
     args.HandleHistory = pb.handleHistory
+    args.Me = pb.me
     reply := new(TransferReply)
     for {
         ok := call(pb.view.Backup, "PBServer.Transfer", args, reply)
@@ -169,7 +172,7 @@ func (pb *PBServer) transferBackup() error {
 // RPC
 func (pb *PBServer) Transfer(args *TransferArgs, reply *TransferReply) error {
     pb.mu.Lock()
-    if pb.isBackup == true {
+    if pb.isBackup == true && args.Me == pb.view.Primary {
         //pb.dataLock.Lock()
         pb.database = args.Database
         pb.handleHistory = args.HandleHistory
@@ -226,13 +229,6 @@ func (pb *PBServer) updateView() {
             pb.isBackup = false
         }
     }
-    if pb.isPrimary == true && pb.view.Backup != "" {
-        if pb.needTransfer == true {
-            pb.transferBackup()
-        }
-    } else {
-        pb.needTransfer = false
-    }
 }
 
 //
@@ -245,15 +241,20 @@ func (pb *PBServer) tick() {
 
 	// Your code here.
 	deadInterval := viewservice.PingInterval * 3
-	if pb.isdead() == false {
-	    // check if is active
-	    pb.mu.Lock()
-	    if pb.view.Viewnum == 0 || time.Now().Sub(pb.responseTime) > deadInterval {
-	        pb.isActive = false
-	        pb.updateView()
-	    }
-	    pb.mu.Unlock()
-	}
+    // check if is active
+    pb.mu.Lock()
+    if pb.view.Viewnum == 0 || time.Now().Sub(pb.responseTime) > deadInterval {
+        pb.isActive = false
+        pb.updateView()
+    }
+    if pb.isPrimary == true && pb.view.Backup != "" {
+        if pb.needTransfer == true {
+            pb.transferBackup()
+        }
+    } else {
+        pb.needTransfer = false
+    }
+    pb.mu.Unlock()
 }
 
 // tell the server to shut itself down.

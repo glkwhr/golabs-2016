@@ -38,6 +38,7 @@ type GetReply struct {
 type TransferArgs struct {
     Database map[string]string
     HandleHistory map[int64]bool
+    Me string
 }
 
 type TransferReply struct {

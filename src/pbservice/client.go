@@ -7,12 +7,14 @@ import "fmt"
 import "crypto/rand"
 import "math/big"
 import "time"
+import "sync"
 //import "log"
 
 type Clerk struct {
 	vs *viewservice.Clerk
 	// Your declarations here
 	currentPrimary string
+	mu sync.Mutex
 }
 
 // this may come in handy.
@@ -88,20 +90,20 @@ func (ck *Clerk) updatePrimary() {
 func (ck *Clerk) Get(key string) string {
 
 	// Your code here.
+	ck.mu.Lock()
 	args := new(GetArgs)
 	args.Key = key
 	reply := new(GetReply)
-	for ok := call(ck.currentPrimary, "PBServer.Get", args, reply);; {
+	for {
 	    //log.Printf("Gets (%v)\n", key)
-	    if ok == false || ck.currentPrimary == "" || reply.Err == ErrWrongServer {
-	        ck.updatePrimary()
-	        ok = call(ck.currentPrimary, "PBServer.Get", args, reply)
-	    } else {
-            // got a response (OK or ErrNoKey)
-            break
+	    ok := call(ck.currentPrimary, "PBServer.Get", args, reply)
+	    if ok == true && reply.Err != ErrWrongServer {
+	        break   
 	    }
+        time.Sleep(viewservice.PingInterval)
+        ck.updatePrimary()
 	}
-
+    ck.mu.Unlock()
 	return reply.Value
 }
 
@@ -111,6 +113,7 @@ func (ck *Clerk) Get(key string) string {
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 	// Your code here.
+	ck.mu.Lock()
 	args := new(PutAppendArgs)
 	args.Key = key
 	args.Value = value
@@ -118,17 +121,17 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	args.Seq = nrand()
 	reply := new(PutAppendReply)
 	//log.Printf("%vs (%v,%v) to %v Seq:%v\n", op, key, value, ck.currentPrimary, args.Seq)	
-	for ok := call(ck.currentPrimary, "PBServer.PutAppend", args, reply);; {
+	for {
 	    //log.Printf("in loop")	    
 	    //log.Printf("called PutAppend %v", ck.currentPrimary)
-	    if ok == false || ck.currentPrimary == "" || reply.Err != OK {
-	        ck.updatePrimary()
-	        ok = call(ck.currentPrimary, "PBServer.PutAppend", args, reply)
-	    } else {
+	    ok := call(ck.currentPrimary, "PBServer.PutAppend", args, reply)
+	    if ok == true && reply.Err == OK {
 	        break
 	    }
 	    time.Sleep(viewservice.PingInterval)
+	    ck.updatePrimary()
 	}
+	ck.mu.Unlock()
 }
 
 //
