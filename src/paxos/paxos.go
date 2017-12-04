@@ -20,16 +20,18 @@ package paxos
 // px.Min() int -- instances before this seq have been forgotten
 //
 
-import "net"
-import "net/rpc"
-import "log"
-
-import "os"
-import "syscall"
-import "sync"
-import "sync/atomic"
-import "fmt"
-import "math/rand"
+import (
+	"fmt"
+	"log"
+	"math/rand"
+	"net"
+	"net/rpc"
+	"os"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"time"
+)
 
 // px.Status() return values, indicating
 // whether an agreement has been decided,
@@ -227,6 +229,7 @@ func (px *Paxos) propose(seq int, v interface{}) {
 			// if not
 			proposeValue = v
 			n = highestProposeNum + 1
+			time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond)
 			continue
 		} else {
 			// prepare_ok from majority
@@ -239,6 +242,7 @@ func (px *Paxos) propose(seq int, v interface{}) {
 				}
 			}
 			if okCount < (len(px.peers)/2 + 1) {
+				time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond)
 				continue
 			} else {
 				// accept_ok from majority
@@ -423,7 +427,6 @@ func (px *Paxos) decide(peerIndex int, seq int, acceptedProposeNumber int, v int
 
 func (px *Paxos) DecideHandler(args *DecideArgs, reply *DecideReply) error {
 	px.mu.Lock()
-	defer px.mu.Unlock()
 
 	// update done seq of the sender
 	if args.DoneSeq > px.doneSeqs[args.PeerIndex] {
@@ -448,6 +451,9 @@ func (px *Paxos) DecideHandler(args *DecideArgs, reply *DecideReply) error {
 			px.instances[args.Seq].n_p = args.AcceptedProposeNumber
 		}
 	}
+
+	px.mu.Unlock()
+	px.Min()
 
 	return nil
 }
