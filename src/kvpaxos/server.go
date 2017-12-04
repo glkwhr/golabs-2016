@@ -1,17 +1,19 @@
 package kvpaxos
 
-import "net"
-import "fmt"
-import "net/rpc"
-import "log"
-import "paxos"
-import "sync"
-import "sync/atomic"
-import "os"
-import "syscall"
-import "encoding/gob"
-import "math/rand"
-
+import (
+	"encoding/gob"
+	"fmt"
+	"log"
+	"math/rand"
+	"net"
+	"net/rpc"
+	"os"
+	"paxos"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"time"
+)
 
 const Debug = 0
 
@@ -22,11 +24,14 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Key   string
+	Value string
+	Type  string
+	Uid   string
 }
 
 type KVPaxos struct {
@@ -38,18 +43,124 @@ type KVPaxos struct {
 	px         *paxos.Paxos
 
 	// Your definitions here.
+	database    map[string]string
+	history     map[string]bool
+	seqToCommit int
 }
-
 
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 	// Your code here.
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	DPrintf("%d Get %s\n", args.Uid, args.Key)
+
+	// if not handled
+	if _, exists := kv.history[args.Uid]; !exists {
+		op := Op{}
+		op.Key = args.Key
+		op.Type = "Get"
+		op.Uid = args.Uid
+		// handle this request
+		kv.handle(op)
+	}
+
+	// if the entry exists in database
+	if _, exists := kv.database[args.Key]; exists {
+		reply.Value = kv.database[args.Key]
+		reply.Err = OK
+	} else {
+		reply.Err = ErrNoKey
+	}
 	return nil
 }
 
 func (kv *KVPaxos) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	// Your code here.
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
 
+	DPrintf("%d %s %s, %s\n", args.Uid, args.Op, args.Key, args.Value)
+
+	// if not handled
+	if _, exists := kv.history[args.Uid]; !exists {
+		op := Op{}
+		op.Key = args.Key
+		op.Value = args.Value
+		op.Type = args.Op
+		op.Uid = args.Uid
+		// handle this request
+		kv.handle(op)
+	}
+	reply.Err = OK
 	return nil
+}
+
+func (kv *KVPaxos) handle(op Op) {
+	for {
+		// synchronize local paxos peer with other peers
+		// commit log in sync() too
+		kv.sync()
+		v := kv.addToLog(kv.seqToCommit, op)
+		if v == op {
+			break
+		}
+	}
+}
+
+func (kv *KVPaxos) sync() {
+	maxSeq := kv.px.Max()
+	for kv.seqToCommit <= maxSeq {
+		status, v := kv.px.Status(kv.seqToCommit)
+		if status == paxos.Pending {
+			// values doesn't matter
+			// there should have been an accepted value
+			kv.addToLog(kv.seqToCommit, Op{})
+			status, v = kv.px.Status(kv.seqToCommit)
+		}
+		to := 10 * time.Millisecond
+		for {
+			if status == paxos.Decided {
+				// commit log
+				op := v.(Op)
+				if op.Type != "Get" {
+					// if not handled
+					if _, exists := kv.history[op.Uid]; !exists {
+						if op.Type == "Put" {
+							kv.database[op.Key] = op.Value
+						} else if op.Type == "Append" {
+							kv.database[op.Key] += op.Value
+						}
+						kv.history[op.Uid] = true
+					}
+				}
+				break
+			}
+			time.Sleep(to)
+			if to < 10*time.Second {
+				to *= 2
+			}
+			status, v = kv.px.Status(kv.seqToCommit)
+		}
+		// after committing a log entry
+		kv.seqToCommit++
+	}
+	kv.px.Done(kv.seqToCommit - 1)
+}
+
+func (kv *KVPaxos) addToLog(seq int, v interface{}) interface{} {
+	kv.px.Start(seq, v)
+	to := 10 * time.Millisecond
+	for {
+		status, v := kv.px.Status(seq)
+		if status == paxos.Decided {
+			return v
+		}
+		time.Sleep(to)
+		if to < 10*time.Second {
+			to *= 2
+		}
+	}
 }
 
 // tell the server to shut itself down.
@@ -94,6 +205,9 @@ func StartServer(servers []string, me int) *KVPaxos {
 	kv.me = me
 
 	// Your initialization code here.
+	kv.database = make(map[string]string)
+	kv.history = make(map[string]bool)
+	kv.seqToCommit = 0
 
 	rpcs := rpc.NewServer()
 	rpcs.Register(kv)
@@ -106,7 +220,6 @@ func StartServer(servers []string, me int) *KVPaxos {
 		log.Fatal("listen error: ", e)
 	}
 	kv.l = l
-
 
 	// please do not change any of the following code,
 	// or do anything to subvert it.
