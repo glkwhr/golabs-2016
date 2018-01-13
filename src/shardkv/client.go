@@ -1,18 +1,22 @@
 package shardkv
 
-import "shardmaster"
-import "net/rpc"
-import "time"
-import "sync"
-import "fmt"
-import "crypto/rand"
-import "math/big"
+import (
+	"crypto/rand"
+	"fmt"
+	"math/big"
+	"net/rpc"
+	"shardmaster"
+	"strconv"
+	"sync"
+	"time"
+)
 
 type Clerk struct {
 	mu     sync.Mutex // one RPC at a time
 	sm     *shardmaster.Clerk
 	config shardmaster.Config
 	// You'll have to modify Clerk.
+	me int64 // client id
 }
 
 func nrand() int64 {
@@ -26,6 +30,7 @@ func MakeClerk(shardmasters []string) *Clerk {
 	ck := new(Clerk)
 	ck.sm = shardmaster.MakeClerk(shardmasters)
 	// You'll have to modify MakeClerk.
+	ck.me = nrand()
 	return ck
 }
 
@@ -88,6 +93,11 @@ func (ck *Clerk) Get(key string) string {
 
 	// You'll have to modify Get().
 
+	args := &GetArgs{}
+	args.Key = key
+	args.ClientID = ck.me
+	args.Seq = strconv.FormatInt(time.Now().UnixNano(), 10) + "#" + strconv.FormatInt(ck.me, 10)
+	var reply GetReply
 	for {
 		shard := key2shard(key)
 
@@ -98,15 +108,13 @@ func (ck *Clerk) Get(key string) string {
 		if ok {
 			// try each server in the shard's replication group.
 			for _, srv := range servers {
-				args := &GetArgs{}
-				args.Key = key
-				var reply GetReply
 				ok := call(srv, "ShardKV.Get", args, &reply)
 				if ok && (reply.Err == OK || reply.Err == ErrNoKey) {
 					return reply.Value
 				}
 				if ok && (reply.Err == ErrWrongGroup) {
-					break
+					DPrintf("C: %v Config: %v Server: %v", ck.me, ck.config.Num, srv)
+					continue
 				}
 			}
 		}
@@ -125,6 +133,13 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 	// You'll have to modify PutAppend().
 
+	args := &PutAppendArgs{}
+	args.Key = key
+	args.Value = value
+	args.Op = op
+	args.ClientID = ck.me
+	args.Seq = strconv.FormatInt(time.Now().UnixNano(), 10) + "#" + strconv.FormatInt(ck.me, 10)
+	var reply PutAppendReply
 	for {
 		shard := key2shard(key)
 
@@ -135,11 +150,6 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		if ok {
 			// try each server in the shard's replication group.
 			for _, srv := range servers {
-				args := &PutAppendArgs{}
-				args.Key = key
-				args.Value = value
-				args.Op = op
-				var reply PutAppendReply
 				ok := call(srv, "ShardKV.PutAppend", args, &reply)
 				if ok && reply.Err == OK {
 					return
